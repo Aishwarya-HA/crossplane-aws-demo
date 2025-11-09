@@ -1,1 +1,21 @@
+name: Terminate EC2 Instance
 
+on:
+  workflow_dispatch: # allows manual run from Actions → Run workflow
+
+jobs:
+  terminate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-1
+
+      - name: Terminate EC2 instance (by ID)
+        run: |
+          INSTANCE_ID="i-0123456789abcdef0" # <-- replace this with your instance id
+          aws ec2 terminate-instances --instance-ids "$INSTANCE_ID"
+          echo "Terminate API call sent for $INSTANCE_ID"
