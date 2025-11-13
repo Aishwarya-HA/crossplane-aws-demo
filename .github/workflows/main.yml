@@ -20,9 +20,9 @@ jobs:
       - name: Launch EC2 Instance
         run: |
           aws ec2 run-instances \
-            --image-id ami-0f2c95e9fe3f8f80e \  # Amazon Linux 2 AMI for ap-southeast-1
+            --image-id ami-0f2c95e9fe3f8f80e \
             --count 1 \
             --instance-type t3.micro \
-            --key-name my-ec2-key \            # Replace with your key pair name
-            --security-group-ids sg-0ba31e59590137371 \ # Replace with your Security Group ID
-            --subnet-id subnet-038d8be488af8f7d3  # Replace with your Subnet ID
+            --key-name my-ec2-key \
+            --security-group-ids sg-0ba31e59590137371 \
+            --subnet-id subnet-038d8be488af8f7d3
