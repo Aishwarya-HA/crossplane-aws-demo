@@ -7,6 +7,7 @@ on:
 jobs:
   terminate-ec2:
     runs-on: ubuntu-latest
+
     steps:
       - name: Download Instance ID Artifact
         uses: actions/download-artifact@v4
@@ -15,7 +16,7 @@ jobs:
 
       - name: Read Instance ID
         run: |
-          INSTANCE_ID=$(cat instance_id.txt)
+          INSTANCE_ID=$(cat instance-id.txt)
           echo "INSTANCE_ID=$INSTANCE_ID" >> $GITHUB_ENV
 
       - name: Configure AWS Credentials
@@ -27,21 +28,20 @@ jobs:
 
       - name: Validate Instance ID
         run: |
-          echo "Validating instance: $INSTANCE_ID"
-          if aws ec2 describe-instances --instance-ids "$INSTANCE_ID" >/dev/null 2>&1; then
+          echo "Validating instance: ${{ env.INSTANCE_ID }}"
+          if aws ec2 describe-instances --instance-ids "${{ env.INSTANCE_ID }}" >/dev/null 2>&1; then
             echo "Instance exists. Proceeding to terminate."
           else
-            echo "Instance $INSTANCE_ID does not exist or is already terminated."
+            echo "Instance ${{ env.INSTANCE_ID }} does not exist or is already terminated."
             exit 0
 
       - name: Terminate EC2 Instance
         run: |
-          echo "Terminating EC2 instance: $INSTANCE_ID"
-          aws ec2 terminate-instances --instance-ids "$INSTANCE_ID"
-          echo "Terminate API call sent for $INSTANCE_ID"
+          echo "Terminating EC2 instance: ${{ env.INSTANCE_ID }}"
+          aws ec2 terminate-instances --instance-ids "${{ env.INSTANCE_ID }}"
+          echo "Terminate API call sent for ${{ env.INSTANCE_ID }}"
 
       - name: Wait until instance is terminated
         run: |
-          echo "Waiting for instance $INSTANCE_ID to terminate..."
-          aws ec2 wait instance-terminated --instance-ids "$INSTANCE_ID"
-          echo "Instance $INSTANCE_ID is fully terminated."
+          echo "Waiting for instance ${{ env.INSTANCE_ID }} to terminate..."
+          aws ec2 wait instance-terminated --instance-ids "${{ env.INSTANCE_ID }}"
