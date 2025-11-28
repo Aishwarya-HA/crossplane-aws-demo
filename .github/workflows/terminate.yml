@@ -3,7 +3,7 @@ name: Terminate EC2 Instance
 
 on:
   workflow_run:
-    workflows: ["Launch EC2 Instance"]  # Must match the name of your launch workflow
+    workflows: ["Launch EC2 Instance"]  # Must match the name above
     types:
       - completed
 
