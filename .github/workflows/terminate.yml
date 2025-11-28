@@ -29,7 +29,6 @@ jobs:
           else
             echo "Instance $INSTANCE_ID does not exist or is already terminated."
             exit 0
-          fi
 
       - name: Terminate EC2 instance
         run: |
@@ -37,3 +36,11 @@ jobs:
           echo "Terminating EC2 instance: $INSTANCE_ID"
           aws ec2 terminate-instances --instance-ids "$INSTANCE_ID"
           echo "Terminate API call sent for $INSTANCE_ID"
+
+      - name: Wait until instance is terminated
+        run: |
+          INSTANCE_ID="${{ github.event.inputs.instance_id }}"
+          echo "Waiting for instance $INSTANCE_ID to terminate..."
+          aws ec2 wait instance-terminated --instance-ids "$INSTANCE_ID"
+          echo "Instance $INSTANCE_ID is fully terminated."
+
