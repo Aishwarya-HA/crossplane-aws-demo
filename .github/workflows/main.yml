@@ -20,10 +20,19 @@ jobs:
 
       - name: Launch EC2 Instance
         run: |
-          aws ec2 run-instances \
+          echo "Launching EC2 instance..."
+          INSTANCE_ID=$(aws ec2 run-instances \
             --image-id ami-00d8fc944fb171e29 \
             --count 1 \
             --instance-type t3.micro \
             --key-name my-ec2-key \
             --security-group-ids sg-0ba31e59590137371 \
-            --subnet-id subnet-038d8be488af8f7d3
+            --subnet-id subnet-038d8be488af8f7d3 \
+            --tag-specifications 'ResourceType=instance,Tags=[{Key=Name,Value=GitHub-EC2}]' \
+            --query 'Instances[0].InstanceId' \
+            --output text)
+          echo "Instance launched with ID: $INSTANCE_ID"
+          echo "$INSTANCE_ID" > instance_id.txt
+
+      - name: Upload Instance ID as Artifact
+        uses: actions/upload-artifact@v3
