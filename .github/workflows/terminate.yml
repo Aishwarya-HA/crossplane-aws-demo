@@ -2,7 +2,10 @@
 name: Terminate EC2 Instance
 
 on:
-  workflow_dispatch:
+  workflow_run:
+    workflows: ["Launch EC2 Instance"]  # Must match the name of your launch workflow
+    types:
+      - completed
 
 jobs:
   terminate-ec2:
@@ -45,3 +48,4 @@ jobs:
         run: |
           echo "Waiting for instance ${{ env.INSTANCE_ID }} to terminate..."
           aws ec2 wait instance-terminated --instance-ids "${{ env.INSTANCE_ID }}"
+          echo "Instance ${{ env.INSTANCE_ID }} is fully terminated."
