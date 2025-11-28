@@ -30,3 +30,12 @@ jobs:
             --subnet-id subnet-038d8be488af8f7d3 \
             --tag-specifications 'ResourceType=instance,Tags=[{Key=Name,Value=GitHub-EC2}]' \
             --query 'Instances[0].InstanceId' \
+            --output text)
+          echo "Instance launched with ID: $INSTANCE_ID"
+          echo "$INSTANCE_ID" > instance_id.txt
+
+      - name: Upload Instance ID as Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ec2-instance-id
+          path: instance_id.txt
