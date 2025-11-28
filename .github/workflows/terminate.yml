@@ -3,12 +3,13 @@ name: Terminate EC2 Instance
 
 on:
   workflow_run:
-    workflows: ["Launch EC2 Instance"]  # Must match the name above
+    workflows: ["Launch EC2 Instance"]  # Must match the name of your launch workflow
     types:
       - completed
 
 jobs:
   terminate-ec2:
+    if: ${{ github.event.workflow_run.conclusion == 'success' }} # Only run if launch workflow succeeded
     runs-on: ubuntu-latest
 
     steps:
