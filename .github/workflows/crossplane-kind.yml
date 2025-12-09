@@ -19,8 +19,17 @@ jobs:
       - name: Checkout repo
         uses: actions/checkout@v4
 
+      # Configure AWS credentials via static GitHub Secrets (must be before any aws CLI commands)
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
       - name: Install AWS CLI (if needed)
         run: |
+          set -euo pipefail
           if ! command -v aws >/dev/null 2>&1; then
             sudo apt-get update -y
             sudo apt-get install -y awscli
@@ -44,6 +53,7 @@ jobs:
 
       - name: Install Crossplane
         run: |
+          set -euo pipefail
           helm repo add crossplane-stable https://charts.crossplane.io/stable
           helm repo update
           helm install crossplane \
@@ -54,6 +64,7 @@ jobs:
 
       - name: Install AWS EC2 Provider
         run: |
+          set -euo pipefail
           mkdir -p manifests
           cat > manifests/01-provider-aws-ec2.yaml <<'EOF'
           apiVersion: pkg.crossplane.io/v1
@@ -71,6 +82,7 @@ jobs:
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
         run: |
+          set -euo pipefail
           cat > manifests/02-aws-credentials-secret.yaml <<'EOF'
           apiVersion: v1
           kind: Secret
@@ -105,16 +117,19 @@ jobs:
       - name: Fetch latest AMI (AL2023 x86_64) via SSM
         id: ami
         run: |
+          set -euo pipefail
+          PARAM_NAME="/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64"
           AMI_ID=$(aws ssm get-parameter \
-            --name /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64 \
+            --name "${PARAM_NAME}" \
             --query 'Parameter.Value' \
             --output text \
             --region "${AWS_REGION}")
-          echo "AMI_ID=${AMI_ID}" >> $GITHUB_OUTPUT
+          echo "AMI_ID=${AMI_ID}" >> "$GITHUB_OUTPUT"
           echo "Resolved latest AL2023 AMI: ${AMI_ID}"
 
       - name: Create EC2 Instance manifest with fetched AMI
         run: |
+          set -euo pipefail
           cat > manifests/10-ec2-instance.yaml <<EOF
           apiVersion: ec2.aws.upbound.io/v1beta1
           kind: Instance
@@ -144,6 +159,7 @@ jobs:
 
       - name: Apply Crossplane manifests
         run: |
+          set -euo pipefail
           kubectl apply -f manifests/01-provider-aws-ec2.yaml
           kubectl apply -f manifests/02-aws-credentials-secret.yaml
           kubectl apply -f manifests/03-providerconfig.yaml
