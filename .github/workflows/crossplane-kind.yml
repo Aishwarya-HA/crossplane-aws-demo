@@ -166,7 +166,50 @@ jobs:
           kubectl apply -f manifests/03-providerconfig.yaml
           kubectl apply -f manifests/10-ec2-instance.yaml
 
-      - name: Check Instance CR status
+      # 🔎 Added diagnostics: wait longer, print provider logs & events
+      - name: Wait until Instance is Ready & print diagnostics
         run: |
-          sleep 120
-          kubectl get instances.ec2.aws.upbound.io -o wide
+          set -euo pipefail
+
+          echo "🔎 Checking Provider and CRDs..."
+          kubectl get provider.pkg.crossplane.io
+          kubectl -n crossplane-system get pods | grep provider-aws-ec2 || true
+
+          echo "⏳ Waiting up to 10 minutes for Instance to be Ready..."
+          for i in {1..60}; do
+            READY=$(kubectl get instances.ec2.aws.upbound.io ${INSTANCE_NAME} -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}' 2>/dev/null || true)
+            SYNCED=$(kubectl get instances.ec2.aws.upbound.io ${INSTANCE_NAME} -o jsonpath='{.status.conditions[?(@.type=="Synced")].status}' 2>/dev/null || true)
+
+            if [ "$READY" = "True" ] && [ "$SYNCED" = "True" ]; then
+              echo "✅ Instance CR is Ready & Synced."
+              break
+            fi
+
+            if (( i % 10 == 0 )); then
+              echo "----- Instance describe (iteration $i) -----"
+              kubectl describe instance ${INSTANCE_NAME} || true
+              echo "----- Recent events -----"
+              kubectl get events -A --sort-by=.lastTimestamp | tail -n 50 || true
+              echo "----- Provider logs (last 150 lines) -----"
+              kubectl -n crossplane-system logs deploy/provider-aws-ec2 --tail=150 || true
+            fi
+
+            echo "Waiting... ($i/60) READY=$READY SYNCED=$SYNCED"
+            sleep 10
+          done
+
+          echo "----- Final Instance status -----"
+          kubectl get instances.ec2.aws.upbound.io ${INSTANCE_NAME} -o yaml || true
+
+      # 🧪 Check in AWS if the instance exists
+      - name: AWS: describe instance by tag
+        run: |
+          set -euo pipefail
+          aws ec2 describe-instances \
+            --region "${AWS_REGION}" \
+            --filters "Name=tag:Name,Values=${INSTANCE_NAME}" "Name=instance-state-name,Values=pending,running" \
+            --query "Reservations[].Instances[].{Id:InstanceId,State:State.Name,PublicIp:PublicIpAddress,Subnet:SubnetId}" \
+            --output table || true
+
+      - name: Check Instance CR status (summary)
+        run: |
