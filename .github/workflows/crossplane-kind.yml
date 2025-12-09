@@ -127,7 +127,7 @@ jobs:
           echo "AMI_ID=${AMI_ID}" >> "$GITHUB_OUTPUT"
           echo "Resolved latest AL2023 AMI: ${AMI_ID}"
 
-      - name: Create EC2 Instance manifest with fetched AMI
+      - name: Create EC2 Instance manifest with fetched AMI (deletionPolicy=Orphan)
         run: |
           set -euo pipefail
           cat > manifests/10-ec2-instance.yaml <<EOF
@@ -138,7 +138,7 @@ jobs:
             labels:
               app: crossplane-ec2
           spec:
-            deletionPolicy: Delete
+            deletionPolicy: Orphan
             providerConfigRef:
               name: default
             forProvider:
@@ -147,7 +147,6 @@ jobs:
               instanceType: t3.micro
               keyName: ${KEY_NAME}
               subnetId: ${SUBNET_ID}
-              # Correct field name for security groups (list of SG IDs):
               vpcSecurityGroupIds:
                 - ${SG_ID}
               associatePublicIpAddress: true
@@ -166,15 +165,9 @@ jobs:
           kubectl apply -f manifests/03-providerconfig.yaml
           kubectl apply -f manifests/10-ec2-instance.yaml
 
-      # 🔎 Added diagnostics: wait longer, print provider logs & events
-      - name: Wait until Instance is Ready & print diagnostics
+      - name: Wait until Instance is Ready
         run: |
           set -euo pipefail
-
-          echo "🔎 Checking Provider and CRDs..."
-          kubectl get provider.pkg.crossplane.io
-          kubectl -n crossplane-system get pods | grep provider-aws-ec2 || true
-
           echo "⏳ Waiting up to 10 minutes for Instance to be Ready..."
           for i in {1..60}; do
             READY=$(kubectl get instances.ec2.aws.upbound.io ${INSTANCE_NAME} -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}' 2>/dev/null || true)
@@ -188,21 +181,20 @@ jobs:
             if (( i % 10 == 0 )); then
               echo "----- Instance describe (iteration $i) -----"
               kubectl describe instance ${INSTANCE_NAME} || true
-              echo "----- Recent events -----"
-              kubectl get events -A --sort-by=.lastTimestamp | tail -n 50 || true
-              echo "----- Provider logs (last 150 lines) -----"
-              kubectl -n crossplane-system logs deploy/provider-aws-ec2 --tail=150 || true
+              echo "----- Provider logs (last 100 lines) -----"
+              kubectl -n crossplane-system logs deploy/provider-aws-ec2 --tail=100 || true
             fi
 
             echo "Waiting... ($i/60) READY=$READY SYNCED=$SYNCED"
             sleep 10
           done
 
-          echo "----- Final Instance status -----"
-          kubectl get instances.ec2.aws.upbound.io ${INSTANCE_NAME} -o yaml || true
+      - name: Keep instance running for 5 minutes
+        run: |
+          echo "🕔 Holding EC2 instance for 5 minutes..."
+          sleep 300
 
-      # 🧪 Check in AWS if the instance exists
-      - name: AWS: describe instance by tag
+      - name: Print AWS details (before terminate)
         run: |
           set -euo pipefail
           aws ec2 describe-instances \
@@ -211,5 +203,40 @@ jobs:
             --query "Reservations[].Instances[].{Id:InstanceId,State:State.Name,PublicIp:PublicIpAddress,Subnet:SubnetId}" \
             --output table || true
 
-      - name: Check Instance CR status (summary)
+      # Terminate EC2 directly (because deletionPolicy: Orphan means CR deletion won't terminate)
+      - name: Terminate EC2 via AWS CLI
+        id: terminate
         run: |
+          set -euo pipefail
+          INSTANCE_ID=$(aws ec2 describe-instances \
+            --region "${AWS_REGION}" \
+            --filters "Name=tag:Name,Values=${INSTANCE_NAME}" "Name=instance-state-name,Values=pending,running" \
+            --query "Reservations[].Instances[].InstanceId" \
+            --output text)
+          if [ -z "${INSTANCE_ID}" ]; then
+            echo "No running/pending instance found with tag Name=${INSTANCE_NAME}"
+          else
+            echo "Terminating instance ${INSTANCE_ID}..."
+            aws ec2 terminate-instances --region "${AWS_REGION}" --instance-ids "${INSTANCE_ID}"
+          fi
+          echo "INSTANCE_ID=${INSTANCE_ID}" >> "$GITHUB_OUTPUT"
+
+      - name: Wait for termination (AWS)
+        run: |
+          set -euo pipefail
+          INSTANCE_ID="${{ steps.terminate.outputs.INSTANCE_ID }}"
+          if [ -n "${INSTANCE_ID}" ]; then
+            aws ec2 wait instance-terminated --region "${AWS_REGION}" --instance-ids "${INSTANCE_ID}" || true
+          fi
+          aws ec2 describe-instances \
+            --region "${AWS_REGION}" \
+            --filters "Name=tag:Name,Values=${INSTANCE_NAME}" \
+            --query "Reservations[].Instances[].{Id:InstanceId,State:State.Name}" \
+            --output table || true
+
+      # Optional: delete the Instance CR (it will not delete the EC2 due to Orphan)
+      - name: Cleanup CR (orphaned external resource already terminated via AWS)
+        run: |
+          set -euo pipefail
+          kubectl delete instance ${INSTANCE_NAME} --ignore-not-found=true || true
+          kubectl get instances.ec2.aws.upbound.io -o wide || true
