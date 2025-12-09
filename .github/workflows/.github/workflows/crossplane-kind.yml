@@ -9,7 +9,6 @@ jobs:
     runs-on: ubuntu-latest
 
     env:
-      # --- Your environment values ---
       AWS_REGION: ap-southeast-1                 # Region (not AZ)
       KEY_NAME: my-ec2-key                       # Your existing key pair
       SUBNET_ID: subnet-04a3d7203696a50d8        # Your subnet
@@ -19,6 +18,15 @@ jobs:
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
+
+      # Ensure AWS CLI is present (best-effort)
+      - name: Install AWS CLI (if needed)
+        run: |
+          if ! command -v aws >/dev/null 2>&1; then
+            sudo apt-get update -y
+            sudo apt-get install -y awscli
+          fi
+          aws --version
 
       # 1) Create kind cluster (ephemeral)
       - name: Create kind cluster
@@ -139,23 +147,4 @@ jobs:
                 - ${SG_ID}
               associatePublicIpAddress: true
               tags:
-                Name: "${INSTANCE_NAME}"
-                Owner: "Aishwarya-HA"
-                ManagedBy: "Crossplane"
-          EOF
 
-          echo "Rendered manifests/10-ec2-instance.yaml:"
-          cat manifests/10-ec2-instance.yaml
-
-      # 8) Apply manifests (create EC2)
-      - name: Apply Crossplane manifests
-        run: |
-          kubectl apply -f manifests/01-provider-aws-ec2.yaml
-          kubectl apply -f manifests/02-aws-credentials-secret.yaml
-          kubectl apply -f manifests/03-providerconfig.yaml
-          kubectl apply -f manifests/10-ec2-instance.yaml
-
-      # 9) Observe status (best-effort)
-      - name: Check Instance CR status
-        run: |
-          # Give Crossplane controller some time to reconcile
