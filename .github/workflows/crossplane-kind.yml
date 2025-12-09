@@ -83,7 +83,8 @@ jobs:
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
         run: |
           set -euo pipefail
-          cat > manifests/02-aws-credentials-secret.yaml <<'EOF'
+          # ✅ UNQUOTED heredoc so variables expand into the Secret
+          cat > manifests/02-aws-credentials-secret.yaml <<EOF
           apiVersion: v1
           kind: Secret
           metadata:
@@ -113,6 +114,19 @@ jobs:
 
           kubectl apply -f manifests/02-aws-credentials-secret.yaml
           kubectl apply -f manifests/03-providerconfig.yaml
+
+      # Optional but recommended: validate provider credentials via STS using the Secret content
+      - name: Validate provider credentials via STS
+        run: |
+          set -euo pipefail
+          CREDS=$(kubectl -n crossplane-system get secret aws-creds -o jsonpath='{.data.credentials}' | base64 -d)
+          AKID=$(echo "$CREDS" | awk -F' = ' '/aws_access_key_id/ {print $2}')
+          SKID=$(echo "$CREDS" | awk -F' = ' '/aws_secret_access_key/ {print $2}')
+          if [ -z "$AKID" ] || [ -z "$SKID" ]; then
+            echo "❌ Missing access key or secret in Secret"; exit 1
+          fi
+          AWS_ACCESS_KEY_ID="$AKID" AWS_SECRET_ACCESS_KEY="$SKID" aws sts get-caller-identity --region "${AWS_REGION}"
+          echo "✅ Provider credentials valid."
 
       - name: Fetch latest AMI (AL2023 x86_64) via SSM
         id: ami
@@ -181,8 +195,12 @@ jobs:
             if (( i % 10 == 0 )); then
               echo "----- Instance describe (iteration $i) -----"
               kubectl describe instance ${INSTANCE_NAME} || true
-              echo "----- Provider logs (last 100 lines) -----"
-              kubectl -n crossplane-system logs deploy/provider-aws-ec2 --tail=100 || true
+              echo "----- Provider logs (last 120 lines) -----"
+              # Find provider pod dynamically, then tail logs
+              POD=$(kubectl -n crossplane-system get pods -l pkg.crossplane.io/provider=provider-aws-ec2 -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)
+              if [ -n "$POD" ]; then
+                kubectl -n crossplane-system logs "$POD" --tail=120 || true
+              fi
             fi
 
             echo "Waiting... ($i/60) READY=$READY SYNCED=$SYNCED"
@@ -218,25 +236,12 @@ jobs:
           else
             echo "Terminating instance ${INSTANCE_ID}..."
             aws ec2 terminate-instances --region "${AWS_REGION}" --instance-ids "${INSTANCE_ID}"
+            aws ec2 wait instance-terminated --region "${AWS_REGION}" --instance-ids "${INSTANCE_ID}" || true
           fi
           echo "INSTANCE_ID=${INSTANCE_ID}" >> "$GITHUB_OUTPUT"
 
-      - name: Wait for termination (AWS)
-        run: |
-          set -euo pipefail
-          INSTANCE_ID="${{ steps.terminate.outputs.INSTANCE_ID }}"
-          if [ -n "${INSTANCE_ID}" ]; then
-            aws ec2 wait instance-terminated --region "${AWS_REGION}" --instance-ids "${INSTANCE_ID}" || true
-          fi
-          aws ec2 describe-instances \
-            --region "${AWS_REGION}" \
-            --filters "Name=tag:Name,Values=${INSTANCE_NAME}" \
-            --query "Reservations[].Instances[].{Id:InstanceId,State:State.Name}" \
-            --output table || true
-
-      # Optional: delete the Instance CR (it will not delete the EC2 due to Orphan)
-      - name: Cleanup CR (orphaned external resource already terminated via AWS)
+      # Optional: delete the Instance CR (orphaned external resource already terminated via AWS)
+      - name: Cleanup CR (optional)
         run: |
           set -euo pipefail
           kubectl delete instance ${INSTANCE_NAME} --ignore-not-found=true || true
-          kubectl get instances.ec2.aws.upbound.io -o wide || true
